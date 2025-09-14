@@ -1,0 +1,38 @@
+import express from "express";
+import cors from "cors";
+import helmet from "helmet";
+import compression from "compression";
+import morgan from "morgan";
+import xss from "xss-clean";
+import hpp from "hpp";
+import { rateLimiter } from "./middleware/rateLimiter";
+import { auditLogger } from "./middleware/auditLogger";
+import patientRoutes from "./routes/patientRoutes";
+import appointmentRoutes from "./routes/appointmentRoutes";
+import clinicalRoutes from "./routes/clinicalRoutes";
+import billingRoutes from "./routes/billingRoutes";
+
+import ehrRoutes from "./routes/ehrRoutes";
+import authRoutes from "./routes/authRoutes";
+import { notFound, errorHandler } from "./middleware/errorMiddleware";
+
+const app = express();
+app.use(helmet());
+app.use(cors());
+app.use(express.json());
+app.use(compression());
+app.use(hpp());
+app.use(xss());
+app.use(morgan("dev"));
+app.use(rateLimiter);
+app.use(auditLogger);
+app.use("/api/auth", authRoutes);
+app.use("/api/patients", patientRoutes);
+app.use("/api/appointments", appointmentRoutes);
+app.use("/api/clinical", clinicalRoutes);
+app.use("/api/billing", billingRoutes);
+app.use("/api/ehr", ehrRoutes);
+app.get("/api/health", (_req, res) => res.json({ ok: true }));
+app.use(notFound);
+app.use(errorHandler);
+export default app;
