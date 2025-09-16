@@ -1,5 +1,7 @@
+// billingController.ts
 import { Request, Response, NextFunction } from "express";
 import * as billingService from "../services/billingService";
+import { isValidObjectId } from "mongoose";
 
 export const eligibility = async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -8,16 +10,61 @@ export const eligibility = async (req: Request, res: Response, next: NextFunctio
   } catch (e) { next(e); }
 };
 
+
+export const updateClaimStatus = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+    const status = typeof req.body?.status === "string" ? req.body.status.trim() : "";
+
+    if (!isValidObjectId(id)) {
+      return res.status(400).json({ message: "invalid_id" });
+    }
+
+    const allowed = ["pending", "submitted", "paid", "denied"];
+    if (!allowed.includes(status)) {
+      return res.status(400).json({ message: "invalid_status" });
+    }
+
+    const updated = await billingService.updateClaimStatus(id, status as any);
+    if (!updated) return res.status(404).json({ message: "not_found" });
+
+    res.json(updated);
+  } catch (e) { next(e); }
+};
+
+// ✅ Updated: typed/narrowed filters + pagination
 export const listClaims = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const r = await billingService.listClaims(String(req.query.patientId));
+    const pageNum   = Number.parseInt(String(req.query.page ?? "1"), 10) || 1;
+    const limitRaw  = Number.parseInt(String(req.query.limit ?? "100"), 10) || 100;
+    const limit     = Math.min(Math.max(limitRaw, 1), 200);
+
+    const orderParam = typeof req.query.order === "string" ? req.query.order.toLowerCase() : "desc";
+    const order: "asc" | "desc" = orderParam === "asc" ? "asc" : "desc";
+
+    const patientId  = typeof req.query.patientId  === "string" ? req.query.patientId.trim()  : undefined;
+    const providerId = typeof req.query.providerId === "string" ? req.query.providerId.trim() : undefined;
+    const status     = typeof req.query.status     === "string" ? req.query.status.trim()     : undefined;
+    const sort       = (typeof req.query.sort === "string" && req.query.sort.trim()) || "createdAt";
+
+    const opts = {
+      patientId,
+      providerId,
+      status,
+      page: pageNum,
+      limit,
+      sort,
+      order,
+    } satisfies Parameters<typeof billingService.listClaims>[0];
+
+    const r = await billingService.listClaims(opts);
     res.json(r);
   } catch (e) { next(e); }
 };
 
 export const createClaim = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const r = await billingService.createClaim(req.body);
+    const r = await billingService.createClaim({ ...req.body });
     res.status(201).json(r);
   } catch (e) { next(e); }
 };
@@ -46,9 +93,7 @@ export const listCodes = async (req: Request, res: Response, next: NextFunction)
 
     const filtered = all.filter(c => {
       const matchesType = type ? c.type.toUpperCase() === type : true;
-      const matchesQ = q
-        ? c.code.toLowerCase().includes(q) || c.description.toLowerCase().includes(q)
-        : true;
+      const matchesQ = q ? c.code.toLowerCase().includes(q) || c.description.toLowerCase().includes(q) : true;
       return matchesType && matchesQ;
     });
 

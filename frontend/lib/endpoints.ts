@@ -16,6 +16,7 @@ export const API = {
     overview: "/api/clinical/overview",
     notes: "/api/clinical/notes",
     vitals: "/api/clinical/vitals",
+    claims: "/api/billing/claims",
     labs: "/api/clinical/labs",
     diagnoses: "/api/clinical/diagnoses",
     history: "/api/clinical/history",

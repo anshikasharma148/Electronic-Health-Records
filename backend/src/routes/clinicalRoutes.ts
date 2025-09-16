@@ -18,17 +18,20 @@ const router = Router();
 
 router.use(protect);
 
-router.get("/overview", allowRoles("admin", "provider", "viewer"), listOverview);
-router.post("/notes", allowRoles("admin", "provider"), addNote);
-router.post("/vitals", allowRoles("admin", "provider"), recordVitals);
-router.get("/labs", allowRoles("admin", "provider", "viewer"), listLabs);
-router.post("/diagnoses", allowRoles("admin", "provider"), addDiagnosis);
+/**
+ * Allow read-only access to admin/provider/viewer/billing for data fetches,
+ * but restrict mutations to admin/provider (matches your UI).
+ */
+router.get("/overview",  allowRoles("admin", "provider", "viewer", "billing"), listOverview);
+router.get("/labs",      allowRoles("admin", "provider", "viewer", "billing"), listLabs);
+router.get("/encounters",allowRoles("admin", "provider", "viewer", "billing"), listEncounters);
+router.get("/history",   allowRoles("admin", "provider", "viewer", "billing"), getHistory);
 
-/* === additions below === */
-router.put("/vitals/:id", allowRoles("admin", "provider"), updateVital);
-router.post("/labs", allowRoles("admin", "provider"), addLab);
-router.get("/encounters", allowRoles("admin", "provider", "viewer"), listEncounters);
-router.post("/encounters", allowRoles("admin", "provider"), addEncounter);
-router.get("/history", allowRoles("admin", "provider", "viewer"), getHistory);
+router.post("/notes",    allowRoles("admin", "provider"), addNote);
+router.post("/vitals",   allowRoles("admin", "provider"), recordVitals);
+router.put("/vitals/:id",allowRoles("admin", "provider"), updateVital);
+router.post("/labs",     allowRoles("admin", "provider"), addLab);
+router.post("/diagnoses",allowRoles("admin", "provider"), addDiagnosis);
+router.post("/encounters",allowRoles("admin", "provider"), addEncounter);
 
 export default router;

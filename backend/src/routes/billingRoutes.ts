@@ -11,6 +11,7 @@ import {
   createPayment,
   getBalance
 } from "../controllers/billingController";
+import * as billing from "../controllers/billingController";
 
 const router = Router();
 
@@ -26,5 +27,10 @@ router.post("/payments", allowRoles("admin", "billing"), createPayment);
 router.get("/balance", allowRoles("admin", "billing"), getBalance);
 router.get("/reports", allowRoles("admin", "billing"), getReports);
 router.get("/codes", allowRoles("admin", "billing"), listCodes);
+router.put(
+  "/claims/:id",
+  allowRoles("admin", "billing"),
+  billing.updateClaimStatus
+);
 
 export default router;
