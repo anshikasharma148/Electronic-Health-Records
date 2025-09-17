@@ -30,17 +30,27 @@ export default function Page() {
   const [data, setData] = useState<Paginated<Patient> | null>(null);
   const [loading, setLoading] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const u = getUser();
   const canCreate = !!u && (u.role === "admin" || u.role === "provider");
+  const canDelete = !!u && u.role === "admin";
+
+  const load = async (query = q, pg = page) => {
+    setLoading(true);
+    try {
+      const r = await api.get(API.patients.root, { params: { q: query, page: pg, limit: 10 } });
+      setData(r.data);
+    } catch {
+      setData({ items: [], page: 1, total: 0 } as any);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    setLoading(true);
-    api
-      .get(API.patients.root, { params: { q, page, limit: 10 } })
-      .then((r) => setData(r.data))
-      .catch(() => setData({ items: [], page: 1, total: 0 } as any))
-      .finally(() => setLoading(false));
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [q, page]);
 
   const onUnauthorizedNew = () => {
@@ -54,6 +64,42 @@ export default function Page() {
       setCopiedId(id);
       setTimeout(() => setCopiedId(null), 2000);
     });
+  };
+
+  const handleDelete = async (id: string, name: string) => {
+    if (!canDelete) return;
+    const ok = confirm(`Delete patient "${name}"?\n\nThis cannot be undone.`);
+    if (!ok) return;
+
+    try {
+      setDeletingId(id);
+      await api.delete(API.patients.one(id));
+
+      // Optimistically update list
+      setData(prev => {
+        if (!prev) return prev;
+        const items = prev.items.filter(p => p._id !== id);
+        const next = { ...prev, items, total: Math.max(0, (prev.total || 0) - 1) };
+        return next as Paginated<Patient>;
+      });
+
+      // If the page becomes empty and we're not on the first page, go back one page
+      setTimeout(() => {
+        setDeletingId(null);
+        setData(curr => {
+          if (curr && curr.items.length === 0 && page > 1) {
+            setPage(p => Math.max(1, p - 1));
+          } else {
+            // refresh current page to keep pagination/total accurate
+            load();
+          }
+          return curr;
+        });
+      }, 100);
+    } catch (e: any) {
+      setDeletingId(null);
+      alert(e?.response?.data?.message || "Failed to delete patient.");
+    }
   };
 
   return (
@@ -158,9 +204,9 @@ export default function Page() {
                           <div className="font-medium text-gray-800">
                             {p.firstName} {p.lastName}
                           </div>
-                          <div className="text-sm text-gray-500 mt-1">
+                          {/* <div className="text-sm text-gray-500 mt-1">
                             {p.email || 'No email'}
-                          </div>
+                          </div> */}
                           <div className="flex items-center gap-2 mt-2">
                             <span className="font-mono text-xs text-gray-400 bg-gray-100 px-2 py-1 rounded">
                               {p._id.substring(0, 8)}...
@@ -202,6 +248,19 @@ export default function Page() {
                           >
                             <FiBook size={14} /> Book
                           </Link>
+
+                          {/* Delete (admin only) */}
+                          {canDelete && (
+                            <Button
+                              variant="outline"
+                              onClick={() => handleDelete(p._id, `${p.firstName} ${p.lastName}`)}
+                              className="inline-flex items-center gap-1 text-red-700 border-red-200 hover:bg-red-50"
+                              disabled={deletingId === p._id}
+                            >
+                              <FiUserX size={14} />
+                              {deletingId === p._id ? "Deleting..." : "Delete"}
+                            </Button>
+                          )}
                         </div>
                       </Td>
                     </tr>

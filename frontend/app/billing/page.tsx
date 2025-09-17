@@ -24,12 +24,13 @@ import {
   FiTrendingUp,
   FiInfo,
   FiCopy,
-  FiEdit,
   FiArrowUp,
   FiArrowDown
 } from "react-icons/fi";
 
 const isObjectId = (s: string) => /^[a-fA-F0-9]{24}$/.test(s);
+const fmt = new Intl.NumberFormat(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const money = (n: any) => `$${fmt.format(Number(n || 0))}`;
 
 export default function Page() {
   const u = getUser();
@@ -126,7 +127,8 @@ export default function Page() {
       // refresh claims & balance
       loadClaims();
       if (isObjectId(payload.patient)) {
-        setBPatient(payload.patient); // reflect in Balance/Payments section too
+        setBPatient(payload.patient);
+        setEPatient(payload.patient);
         loadBalance(payload.patient);
         loadPayments(payload.patient);
       }
@@ -146,12 +148,26 @@ export default function Page() {
   const [fProvider, setFProvider] = useState("");
   const [fStatus, setFStatus] = useState<"" | "pending" | "paid" | "denied">("");
 
+  // NEW: sorting
+  const [sortBy, setSortBy] = useState<"createdAt" | "code" | "amount" | "status">("createdAt");
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
+  const toggleSort = (field: "createdAt" | "code" | "amount" | "status") => {
+    setSortBy((prev) => {
+      if (prev === field) {
+        setSortOrder((o) => (o === "asc" ? "desc" : "asc"));
+        return prev;
+      }
+      setSortOrder("asc");
+      return field;
+    });
+  };
+
   const loadClaims = async () => {
     if (!allowed) return;
     try {
       setClErr(null);
-      const params: Record<string, string> = { limit: "100" };
-      // 🔧 use patientId (not patient) so server-side filter works
+      const params: Record<string, string> = { limit: "100", sort: sortBy, order: sortOrder };
+      // use patientId (server expects patientId)
       if (isObjectId(fPatient)) params.patientId = fPatient.trim();
       if (fProvider.trim()) params.providerId = fProvider.trim();
       if (fStatus) params.status = fStatus;
@@ -170,14 +186,13 @@ export default function Page() {
   useEffect(() => {
     loadClaims();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [allowed]);
+  }, [allowed, sortBy, sortOrder]);
 
   const updateStatus = async (id: string, status: "paid" | "denied" | "pending") => {
     try {
       await api.put(`${API.billing.claims}/${id}`, { status });
       show(`✅ Claim marked ${status}`);
       loadClaims();
-      // also refresh balance/payments if a patient filter is present
       if (isObjectId(fPatient)) {
         loadBalance(fPatient);
         loadPayments(fPatient);
@@ -269,6 +284,17 @@ export default function Page() {
     }
   };
 
+  // Quick action: use PID from a claim row
+  const usePidEverywhere = (pid: string) => {
+    if (!isObjectId(pid)) return;
+    setFPatient(pid);
+    setEPatient(pid);
+    setBPatient(pid);
+    loadBalance(pid);
+    loadPayments(pid);
+    show("🔗 PatientId applied to Eligibility & Balance sections");
+  };
+
   // ---------------- Render ----------------
   if (!allowed) {
     return (
@@ -322,7 +348,7 @@ export default function Page() {
             <div className="text-sm text-gray-500 flex items-center gap-1 mb-1">
               <FiDollarSign className="text-blue-500" /> Total Amount
             </div>
-            <div className="text-2xl font-semibold text-blue-600">${reports?.totalAmount ?? 0}</div>
+            <div className="text-2xl font-semibold text-blue-600">{money(reports?.totalAmount ?? 0)}</div>
           </div>
         </div>
         {repErr && <div className="text-sm text-red-600 mt-3 bg-red-50 p-2 rounded-lg flex items-center gap-2"><FiInfo /> {repErr}</div>}
@@ -335,9 +361,9 @@ export default function Page() {
             <FiUserCheck className="text-blue-500" /> Eligibility Check
           </h2>
           <div className="grid sm:grid-cols-4 gap-2">
-            <Input 
-              placeholder="PatientId (24-hex)" 
-              value={ePatient} 
+            <Input
+              placeholder="PatientId (24-hex)"
+              value={ePatient}
               onChange={(e) => setEPatient(e.target.value)}
               className="sm:col-span-3"
             />
@@ -366,7 +392,7 @@ export default function Page() {
                 <div className="text-xs text-gray-500 flex items-center gap-1">
                   <FiDollarSign className="text-gray-400" /> Copay
                 </div>
-                <div className="text-lg font-semibold text-gray-800">${elig.copay ?? 0}</div>
+                <div className="text-lg font-semibold text-gray-800">{money(elig.copay ?? 0)}</div>
               </div>
             </div>
           )}
@@ -458,6 +484,8 @@ export default function Page() {
                 setFPatient("");
                 setFProvider("");
                 setFStatus("");
+                setSortBy("createdAt");
+                setSortOrder("desc");
                 loadClaims();
               }}
               className="flex items-center gap-1"
@@ -474,34 +502,78 @@ export default function Page() {
                 <tr>
                   <Th>Patient</Th>
                   <Th>Provider</Th>
-                  <Th>Code</Th>
+                  <Th>
+                    <button
+                      type="button"
+                      className="flex items-center gap-1"
+                      onClick={() => toggleSort("code")}
+                      title="Sort by Code"
+                    >
+                      Code {sortBy === "code" && (sortOrder === "asc" ? <FiArrowUp /> : <FiArrowDown />)}
+                    </button>
+                  </Th>
                   <Th>Description</Th>
-                  <Th>Amount</Th>
-                  <Th>Status</Th>
+                  <Th>
+                    <button
+                      type="button"
+                      className="flex items-center gap-1"
+                      onClick={() => toggleSort("amount")}
+                      title="Sort by Amount"
+                    >
+                      Amount {sortBy === "amount" && (sortOrder === "asc" ? <FiArrowUp /> : <FiArrowDown />)}
+                    </button>
+                  </Th>
+                  <Th>
+                    <button
+                      type="button"
+                      className="flex items-center gap-1"
+                      onClick={() => toggleSort("status")}
+                      title="Sort by Status"
+                    >
+                      Status {sortBy === "status" && (sortOrder === "asc" ? <FiArrowUp /> : <FiArrowDown />)}
+                    </button>
+                  </Th>
                   <Th>Actions</Th>
                 </tr>
               </thead>
               <tbody>
-                {claims.map((c: any) => (
+                {claims.map((c: any) => {
+                  const pid =
+                    typeof c.patient === "string" ? c.patient :
+                    c?.patient?._id ? c.patient._id : "";
+
+                  const patientLabel =
+                    typeof c.patient === "string"
+                      ? c.patient
+                      : c?.patient?.firstName
+                      ? `${c.patient.firstName} ${c.patient.lastName}`
+                      : "Unknown";
+
+                return (
                   <tr key={c._id} className="hover:bg-gray-50 transition-colors">
                     <Td>
-                      {typeof c.patient === "string"
-                        ? c.patient
-                        : c?.patient?.firstName
-                        ? `${c.patient.firstName} ${c.patient.lastName}`
-                        : "Unknown"}
+                      <div className="flex items-center gap-2">
+                        <span>{patientLabel}</span>
+                        {pid && isObjectId(pid) && (
+                          <Button
+                            variant="outline"
+                            onClick={() => usePidEverywhere(pid)}
+                            title="Use this PatientId in Eligibility & Balance"
+                            className="px-2 py-1 text-xs"
+                          >
+                            <FiCopy size={12} /> Use PID
+                          </Button>
+                        )}
+                      </div>
                     </Td>
                     <Td>{c.providerId}</Td>
-              
-                    <Td>
-                      <div className="font-mono">{c.code}</div>
-                    </Td>
+                    <Td><div className="font-mono">{c.code}</div></Td>
                     <Td>
                       <div className="max-w-[420px] truncate" title={c.description}>
                         {c.description}
                       </div>
                     </Td>
-                    <Td>${c.amount}</Td>
+                    <Td>{money(c.amount)}</Td>
                     <Td>
                       <span className={`px-2 py-1 rounded-full text-xs font-medium ${
                         c.status === 'paid' 
@@ -539,7 +611,7 @@ export default function Page() {
                       </div>
                     </Td>
                   </tr>
-                ))}
+                )})}
               </tbody>
             </T>
           </Table>
@@ -585,16 +657,13 @@ export default function Page() {
               <tbody>
                 {codes?.map((c: any) => (
                   <tr key={`${c.type}-${c.code}`} className="hover:bg-gray-50 transition-colors">
-
-                    <Td>
-                      <div className="font-mono font-medium">{c.code}</div>
-                    </Td>
+                    <Td><div className="font-mono font-medium">{c.code}</div></Td>
                     <Td>
                       <div className="max-w-[520px] truncate" title={c.description}>
                         {c.description}
                       </div>
                     </Td>
-                    <Td>${c.fee}</Td>
+                    <Td>{money(c.fee)}</Td>
                     <Td>
                       <span className="px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded-full">
                         {c.type}
@@ -670,21 +739,21 @@ export default function Page() {
           <div className="grid sm:grid-cols-4 gap-4 mt-4">
             <div className="rounded-xl border border-gray-200 p-4 bg-gradient-to-br from-white to-gray-50">
               <div className="text-xs text-gray-500 flex items-center gap-1 mb-2">
-                <FiArrowUp className="text-gray-400" /> Claims Total
+                Claims Total
               </div>
-              <div className="text-xl font-semibold text-gray-800">${balance.claimsTotal}</div>
+              <div className="text-xl font-semibold text-gray-800">{money(balance.claimsTotal)}</div>
             </div>
             <div className="rounded-xl border border-gray-200 p-4 bg-gradient-to-br from-white to-gray-50">
               <div className="text-xs text-gray-500 flex items-center gap-1 mb-2">
-                <FiArrowDown className="text-gray-400" /> Payments Total
+                Payments Total
               </div>
-              <div className="text-xl font-semibold text-green-600">${balance.paymentsTotal}</div>
+              <div className="text-xl font-semibold text-green-600">{money(balance.paymentsTotal)}</div>
             </div>
             <div className="rounded-xl border border-gray-200 p-4 bg-gradient-to-br from-white to-blue-50">
               <div className="text-xs text-gray-500 flex items-center gap-1 mb-2">
-                <FiDollarSign className="text-blue-500" /> Balance
+                Balance
               </div>
-              <div className="text-xl font-semibold text-blue-600">${balance.balance}</div>
+              <div className="text-xl font-semibold text-blue-600">{money(balance.balance)}</div>
             </div>
             <div className="rounded-xl border border-gray-200 p-4 bg-gradient-to-br from-white to-gray-50">
               <div className="text-xs text-gray-500 mb-2">By Status</div>
@@ -741,7 +810,11 @@ export default function Page() {
           <div className="text-sm font-medium mb-3 flex items-center gap-2">
             <FiCreditCard className="text-blue-500" /> Payment History
           </div>
-          {payErr && <div className="text-sm text-red-600 bg-red-50 p-2 rounded-lg flex items-center gap-2 mb-3"><FiInfo /> {payErr}</div>}
+          {payErr && (
+            <div className="text-sm text-red-600 bg-red-50 p-2 rounded-lg flex items-center gap-2 mb-3">
+              <FiInfo /> {payErr}
+            </div>
+          )}
           {payments.length > 0 ? (
             <div className="overflow-x-auto rounded-lg border border-gray-200">
               <Table>
@@ -758,8 +831,8 @@ export default function Page() {
                       <tr key={p._id} className="hover:bg-gray-50 transition-colors">
                         <Td>{p.date ? new Date(p.date).toLocaleString() : "-"}</Td>
                         <Td>
-  <div className="font-medium text-green-600">${p.amount}</div>
-</Td>
+                          <div className="font-medium text-green-600">{money(p.amount)}</div>
+                        </Td>
                         <Td>
                           <div className="max-w-[420px] truncate" title={p.note}>
                             {p.note}

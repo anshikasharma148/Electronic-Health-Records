@@ -3,12 +3,10 @@ import * as patientService from "../services/patientService";
 
 export const search = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const q = String(req.query.q || "");
+    const q = typeof req.query.q === "string" ? req.query.q : "";
     const r = await patientService.searchPatients(q, req.query);
     res.json(r);
-  } catch (e) {
-    next(e);
-  }
+  } catch (e) { next(e); }
 };
 
 export const getById = async (req: Request, res: Response, next: NextFunction) => {
@@ -16,36 +14,30 @@ export const getById = async (req: Request, res: Response, next: NextFunction) =
     const r = await patientService.getPatient(req.params.id);
     if (!r) return res.status(404).json({ message: "not_found" });
     res.json(r);
-  } catch (e) {
-    next(e);
-  }
+  } catch (e) { next(e); }
 };
 
 export const createOne = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const r = await patientService.createPatient(req.body);
     res.status(201).json(r);
-  } catch (e) {
-    next(e);
-  }
+  } catch (e) { next(e); }
 };
 
 export const updateOne = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const r = await patientService.updatePatient(req.params.id, req.body);
+    if (!r) return res.status(404).json({ message: "not_found" });
     res.json(r);
-  } catch (e) {
-    next(e);
-  }
+  } catch (e) { next(e); }
 };
 
 export const updateAllergiesConditions = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const r = await patientService.updateAllergiesAndConditions(req.params.id, req.body);
+    if (!r) return res.status(404).json({ message: "not_found" });
     res.json(r);
-  } catch (e) {
-    next(e);
-  }
+  } catch (e) { next(e); }
 };
 
 export const updateMedications = async (req: Request, res: Response, next: NextFunction) => {
@@ -54,10 +46,9 @@ export const updateMedications = async (req: Request, res: Response, next: NextF
       return res.status(400).json({ message: "medications must be an array" });
     }
     const r = await patientService.updateMedications(req.params.id, req.body.medications);
+    if (!r) return res.status(404).json({ message: "not_found" });
     res.json(r);
-  } catch (e) {
-    next(e);
-  }
+  } catch (e) { next(e); }
 };
 
 export const updateImmunizations = async (req: Request, res: Response, next: NextFunction) => {
@@ -66,17 +57,14 @@ export const updateImmunizations = async (req: Request, res: Response, next: Nex
       return res.status(400).json({ message: "immunizations must be an array" });
     }
     const r = await patientService.updateImmunizations(req.params.id, req.body.immunizations);
+    if (!r) return res.status(404).json({ message: "not_found" });
     res.json(r);
-  } catch (e) {
-    next(e);
-  }
+  } catch (e) { next(e); }
 };
 
 export const deleteOne = async (req: Request, res: Response, next: NextFunction) => {
   try {
     await patientService.deletePatient(req.params.id);
     res.status(204).end();
-  } catch (e) {
-    next(e);
-  }
+  } catch (e) { next(e); }
 };
