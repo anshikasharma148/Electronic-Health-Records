@@ -1,5 +1,5 @@
 import express from "express";
-import cors from "cors";
+import cors, { CorsOptionsDelegate } from "cors";
 import helmet from "helmet";
 import compression from "compression";
 import morgan from "morgan";
@@ -18,30 +18,28 @@ import { notFound, errorHandler } from "./middleware/errorMiddleware";
 
 const app = express();
 
-// Behind Render’s proxy (helps rateLimiter / IPs)
-app.set("trust proxy", 1);
-
-// Explicit CORS: allow your Vercel app and local dev
-const allowedOrigins = [
-  "https://electronic-health-records.vercel.app",
+/** CORS: allow deployed frontend + local dev, include Authorization, handle preflight */
+const allowlist = [
+  process.env.FRONTEND_ORIGIN || "https://electronic-health-records.vercel.app",
   "http://localhost:3000",
 ];
 
-app.use(
-  cors({
-    origin: (origin, cb) => {
-      // allow server-to-server tools like Postman (no Origin)
-      if (!origin) return cb(null, true);
-      if (allowedOrigins.includes(origin)) return cb(null, true);
-      return cb(null, false);
-    },
+const corsDelegate: CorsOptionsDelegate = (req, cb) => {
+  const origin = req.headers["origin"] as string | undefined;
+  const isAllowed = !origin || allowlist.includes(origin);
+  cb(null, {
+    origin: isAllowed ? origin : false,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"],
-    credentials: false, // set true only if you move to cookie-based auth
-  })
-);
+    allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
+    credentials: false,
+    maxAge: 86400,
+  });
+};
 
 app.use(helmet());
+app.use(cors(corsDelegate));
+app.options("*", cors(corsDelegate)); // ensure all preflights get CORS headers
+
 app.use(express.json());
 app.use(compression());
 app.use(hpp());
@@ -50,6 +48,12 @@ app.use(morgan("dev"));
 app.use(rateLimiter);
 app.use(auditLogger);
 
+/** Simple root + ping endpoints for uptime checks */
+app.get("/", (_req, res) => res.type("text").send("OK"));
+app.head("/", (_req, res) => res.status(200).end());
+app.get("/api/ping", (_req, res) => res.json({ ok: true, ts: new Date().toISOString() }));
+
+/** API routes */
 app.use("/api/auth", authRoutes);
 app.use("/api/patients", patientRoutes);
 app.use("/api/appointments", appointmentRoutes);
@@ -58,7 +62,7 @@ app.use("/api/billing", billingRoutes);
 app.use("/api/vitals", vitalRoutes);
 app.use("/api/ehr", ehrRoutes);
 
-// Simple health check
+/** Health endpoint */
 app.get("/api/health", (_req, res) => res.json({ ok: true }));
 
 app.use(notFound);
