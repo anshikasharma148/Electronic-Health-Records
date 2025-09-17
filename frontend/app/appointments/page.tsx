@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
 import { API } from "@/lib/endpoints";
@@ -40,7 +40,16 @@ const toLocalInput = (isoOrDate: string | Date) => {
   )}:${pad(d.getMinutes())}`;
 };
 
-export default function Page() {
+export default function PageWrapper() {
+  return (
+    <Suspense fallback={<div className="p-8 text-center text-gray-500">Loading appointments...</div>}>
+      <Page />
+    </Suspense>
+  );
+}
+
+// Rename your main component to Page (was default export before)
+function Page() {
   const sp = useSearchParams();
   const { show, Toast } = useToast();
 

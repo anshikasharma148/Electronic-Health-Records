@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import Input from "@/components/ui/Input";
 import Button from "@/components/ui/Button";
 import { Table, T, Th, Td } from "@/components/ui/Table";
@@ -33,7 +33,7 @@ const toLocalInput = (isoOrDate: string | Date) => {
   )}:${pad(d.getMinutes())}`;
 };
 
-export default function Page() {
+function ClinicalPage() {
   const { show, Toast } = useToast();
 
   const [patientId, setPatientId] = useState("");
@@ -421,6 +421,15 @@ useEffect(() => {
 
       <Toast />
     </div>
+  );
+}
+
+// Wrap your page in Suspense for useSearchParams support
+export default function Page() {
+  return (
+    <Suspense fallback={<div className="p-8 text-center text-gray-500">Loading clinical data...</div>}>
+      <ClinicalPage />
+    </Suspense>
   );
 }
 
