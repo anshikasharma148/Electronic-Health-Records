@@ -58,6 +58,21 @@ const toDateInput = (iso?: string) => {
   return d.toISOString().slice(0, 10); // YYYY-MM-DD
 };
 
+type UINote = { _id: string; text: string; createdAt?: string; authorId?: string };
+type UIVital = {
+  _id: string;
+  recordedAt?: string; when?: string; createdAt?: string;
+  hr?: number; heartRate?: number;
+  bp?: string; bpSystolic?: number; bpDiastolic?: number;
+  temperature?: number;
+};
+type UILab = {
+  _id: string;
+  test?: string; testName?: string; testCode?: string;
+  value?: string; unit?: string;
+  takenAt?: string; createdAt?: string;
+};
+
 export default function Page() {
   const { id } = useParams<{ id: string }>();
   const [patient, setPatient] = useState<Patient | null>(null);
@@ -68,9 +83,41 @@ export default function Page() {
   const u = getUser();
   const canEdit = !!u && (u.role === "admin" || u.role === "provider");
 
+  // ---- Clinical snapshot state ----
+  const [notes, setNotes] = useState<UINote[]>([]);
+  const [vitals, setVitals] = useState<UIVital[]>([]);
+  const [labs, setLabs] = useState<UILab[]>([]);
+  const [cErr, setCErr] = useState<string | null>(null);
+  const [cLoading, setCLoading] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
+
   useEffect(() => {
     api.get(API.patients.one(id)).then(r => setPatient(r.data));
   }, [id]);
+
+  // load clinical overview for this patient
+  const loadOverview = async () => {
+    if (!id) return;
+    try {
+      setCLoading(true);
+      setCErr(null);
+      const r = await api.get(API.clinical.overview, { params: { patientId: id } });
+      const d = r.data || {};
+      setNotes(Array.isArray(d.notes) ? d.notes : []);
+      setVitals(Array.isArray(d.vitals) ? d.vitals : []);
+      setLabs(Array.isArray(d.labs) ? d.labs : []);
+    } catch (e: any) {
+      setCErr(e?.response?.data?.message || "Failed to load clinical data.");
+      setNotes([]); setVitals([]); setLabs([]);
+    } finally {
+      setCLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (id) loadOverview();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, refreshKey]);
 
   // Pre-fill textareas (canonical "CODE|Description" style where applicable)
   const prefill = useMemo(() => {
@@ -179,11 +226,93 @@ export default function Page() {
     }
   };
 
+  // ---- Quick add forms (notes / vitals / labs) ----
+  const [nText, setNText] = useState("");
+  const [nMsg, setNMsg] = useState<string | null>(null);
+  const canAddNote = useMemo(() => canEdit && id && nText.trim().length > 0, [canEdit, id, nText]);
+
+  const addNote = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!canAddNote) return;
+    setNMsg(null);
+    try {
+      await api.post(API.clinical.notes, { patientId: id, text: nText.trim() });
+      setNText("");
+      setNMsg("📝 Note added");
+      setRefreshKey(k => k + 1);
+      setTimeout(() => setNMsg(null), 2000);
+    } catch (ex: any) {
+      setNMsg(ex?.response?.data?.message || "Failed to add note.");
+    }
+  };
+
+  const [vWhen, setVWhen] = useState("");
+  const [vHr, setVHr] = useState<string>("");
+  const [vBp, setVBp] = useState("");
+  const [vMsg, setVMsg] = useState<string | null>(null);
+  const canAddVital = useMemo(
+    () =>
+      canEdit && id && !!vWhen && vHr !== "" && !Number.isNaN(Number(vHr)) && vBp.trim().length > 0,
+    [canEdit, id, vWhen, vHr, vBp]
+  );
+
+  const addVital = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!canAddVital) return;
+    setVMsg(null);
+    try {
+      await api.post(API.clinical.vitals, {
+        patientId: id,
+        when: new Date(vWhen).toISOString(),
+        hr: Number(vHr),
+        bp: vBp.trim(),
+      });
+      setVWhen(""); setVHr(""); setVBp("");
+      setVMsg("❤️ Vitals recorded");
+      setRefreshKey(k => k + 1);
+      setTimeout(() => setVMsg(null), 2000);
+    } catch (ex: any) {
+      setVMsg(ex?.response?.data?.message || "Failed to record vitals.");
+    }
+  };
+
+  const [lTest, setLTest] = useState("");
+  const [lValue, setLValue] = useState("");
+  const [lMsg, setLMsg] = useState<string | null>(null);
+  const canAddLab = useMemo(
+    () => canEdit && id && lTest.trim().length > 0 && lValue.trim().length > 0,
+    [canEdit, id, lTest, lValue]
+  );
+
+  const addLab = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!canAddLab) return;
+    setLMsg(null);
+    try {
+      await api.post(API.clinical.labs, { patientId: id, test: lTest.trim(), value: lValue.trim() });
+      setLTest(""); setLValue("");
+      setLMsg("🧪 Lab result added");
+      setRefreshKey(k => k + 1);
+      setTimeout(() => setLMsg(null), 2000);
+    } catch (ex: any) {
+      setLMsg(ex?.response?.data?.message || "Failed to add lab result.");
+    }
+  };
+
   if (!patient) return (
     <div className="flex justify-center items-center h-64">
       <div className="animate-pulse text-gray-500">Loading patient data...</div>
     </div>
   );
+
+  // helpers to render clinical data in tolerant way (supports both hr/bp and heartRate/bpSystolic/bpDiastolic shapes)
+  const vitalDate = (v: UIVital) => v.recordedAt || v.when || v.createdAt || "";
+  const vitalHR = (v: UIVital) => (v.hr ?? v.heartRate);
+  const vitalBP = (v: UIVital) => v.bp || ((v.bpSystolic != null && v.bpDiastolic != null) ? `${v.bpSystolic}/${v.bpDiastolic}` : undefined);
+
+  const labWhen = (l: UILab) => l.takenAt || l.createdAt || "";
+  const labTest = (l: UILab) => l.test || l.testName || l.testCode || "Lab";
+  const labValue = (l: UILab) => [l.value, l.unit].filter(Boolean).join(" ");
 
   return (
     <div className="max-w-4xl mx-auto px-4 py-8">
@@ -355,7 +484,7 @@ export default function Page() {
           </div>
         </div>
 
-        {/* Clinical sections */}
+        {/* Clinical sections (structured fields) */}
         {canEdit ? (
           <div className="bg-white rounded-2xl shadow-sm p-6 border border-gray-100">
             <h2 className="text-lg font-semibold text-gray-800 mb-4">Clinical Information</h2>
@@ -455,6 +584,181 @@ export default function Page() {
           </Button>
         </div>
       </form>
+
+      {/* =============================== */}
+      {/* Clinical Snapshot + Quick Entry */}
+      {/* =============================== */}
+      <div className="mt-8 space-y-6">
+        <div className="bg-white rounded-2xl shadow-sm p-6 border border-gray-100">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold text-gray-800">Clinical Snapshot</h2>
+            <Button variant="outline" onClick={loadOverview} disabled={cLoading}>
+              {cLoading ? "Refreshing..." : "Refresh"}
+            </Button>
+          </div>
+
+          {cErr && (
+            <div className="mb-4 p-3 bg-red-50 text-red-700 rounded-xl border border-red-200 text-sm flex items-center gap-2">
+              <ExclamationTriangleIcon className="w-4 h-4" />
+              {cErr}
+            </div>
+          )}
+
+          <div className="grid md:grid-cols-3 gap-6">
+            {/* Notes */}
+            <div>
+              <div className="flex items-center gap-2 mb-3">
+                <div className="p-1.5 bg-blue-100 rounded-lg">
+                  <DocumentTextIcon className="w-5 h-5 text-blue-600" />
+                </div>
+                <div className="font-medium text-gray-800">Notes</div>
+                <span className="ml-auto text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">{notes.length}</span>
+              </div>
+              {notes.length === 0 ? (
+                <div className="text-xs text-gray-500 italic">No notes found</div>
+              ) : (
+                <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+                  {notes.map((n) => (
+                    <div key={n._id} className="border border-gray-100 rounded-lg p-3 bg-gray-50">
+                      <div className="text-sm text-gray-800">{n.text}</div>
+                      <div className="mt-1 text-[11px] text-gray-500">{n.createdAt ? new Date(n.createdAt).toLocaleString() : "-"}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Vitals */}
+            <div>
+              <div className="flex items-center gap-2 mb-3">
+                <div className="p-1.5 bg-red-100 rounded-lg">
+                  <HeartIcon className="w-5 h-5 text-red-600" />
+                </div>
+                <div className="font-medium text-gray-800">Vitals</div>
+                <span className="ml-auto text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">{vitals.length}</span>
+              </div>
+              {vitals.length === 0 ? (
+                <div className="text-xs text-gray-500 italic">No vitals recorded</div>
+              ) : (
+                <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+                  {vitals.map((v) => (
+                    <div key={v._id} className="border border-gray-100 rounded-lg p-3 bg-gray-50">
+                      <div className="text-[11px] text-gray-500">
+                        {vitalDate(v) ? new Date(vitalDate(v)!).toLocaleString() : "-"}
+                      </div>
+                      <div className="mt-1 grid grid-cols-2 gap-2 text-sm">
+                        <div>HR: <span className="font-medium">{vitalHR(v) ?? "-"}</span></div>
+                        <div>BP: <span className="font-medium">{vitalBP(v) ?? "-"}</span></div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Labs */}
+            <div>
+              <div className="flex items-center gap-2 mb-3">
+                <div className="p-1.5 bg-green-100 rounded-lg">
+                  <SyringeIcon className="w-5 h-5 text-green-600" />
+                </div>
+                <div className="font-medium text-gray-800">Labs</div>
+                <span className="ml-auto text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">{labs.length}</span>
+              </div>
+              {labs.length === 0 ? (
+                <div className="text-xs text-gray-500 italic">No lab results</div>
+              ) : (
+                <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+                  {labs.map((l) => (
+                    <div key={l._id} className="border border-gray-100 rounded-lg p-3 bg-gray-50">
+                      <div className="text-sm font-medium text-gray-800">{labTest(l)}</div>
+                      <div className="text-sm text-gray-700">{labValue(l) || "-"}</div>
+                      <div className="mt-1 text-[11px] text-gray-500">{labWhen(l) ? new Date(labWhen(l)!).toLocaleString() : "-"}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Quick Entry (admin/provider) */}
+        {canEdit && (
+          <div className="bg-white rounded-2xl shadow-sm p-6 border border-gray-100">
+            <h2 className="text-lg font-semibold text-gray-800 mb-4">Quick Entry</h2>
+            <div className="grid md:grid-cols-3 gap-6">
+              {/* Add Note */}
+              <form onSubmit={addNote} className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <div className="p-1.5 bg-blue-100 rounded-lg">
+                    <DocumentTextIcon className="w-5 h-5 text-blue-600" />
+                  </div>
+                  <div className="font-medium">Add Note</div>
+                </div>
+                <textarea
+                  placeholder="Enter note text..."
+                  value={nText}
+                  onChange={(e) => setNText(e.target.value)}
+                  className="w-full border border-gray-200 rounded-xl p-3 focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all min-h-[88px]"
+                />
+                <Button disabled={!canAddNote} className="w-full">Save Note</Button>
+                {nMsg && <div className="text-xs text-gray-600">{nMsg}</div>}
+              </form>
+
+              {/* Record Vitals */}
+              <form onSubmit={addVital} className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <div className="p-1.5 bg-red-100 rounded-lg">
+                    <HeartIcon className="w-5 h-5 text-red-600" />
+                  </div>
+                  <div className="font-medium">Record Vitals</div>
+                </div>
+                <Input
+                  type="datetime-local"
+                  value={vWhen}
+                  onChange={(e) => setVWhen(e.target.value)}
+                />
+                <Input
+                  placeholder="Heart Rate (bpm)"
+                  value={vHr}
+                  onChange={(e) => setVHr(e.target.value)}
+                  type="number"
+                />
+                <Input
+                  placeholder="Blood Pressure (e.g. 120/80)"
+                  value={vBp}
+                  onChange={(e) => setVBp(e.target.value)}
+                />
+                <Button disabled={!canAddVital} className="w-full">Save Vitals</Button>
+                {vMsg && <div className="text-xs text-gray-600">{vMsg}</div>}
+              </form>
+
+              {/* Add Lab */}
+              <form onSubmit={addLab} className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <div className="p-1.5 bg-green-100 rounded-lg">
+                    <SyringeIcon className="w-5 h-5 text-green-600" />
+                  </div>
+                  <div className="font-medium">Add Lab</div>
+                </div>
+                <Input
+                  placeholder="Test (e.g. CBC, HbA1c)"
+                  value={lTest}
+                  onChange={(e) => setLTest(e.target.value)}
+                />
+                <Input
+                  placeholder="Value (e.g. 6.2%)"
+                  value={lValue}
+                  onChange={(e) => setLValue(e.target.value)}
+                />
+                <Button disabled={!canAddLab} className="w-full">Save Lab</Button>
+                {lMsg && <div className="text-xs text-gray-600">{lMsg}</div>}
+              </form>
+            </div>
+          </div>
+        )}
+      </div>
+      {/* /Clinical Snapshot + Quick Entry */}
     </div>
   );
 }
