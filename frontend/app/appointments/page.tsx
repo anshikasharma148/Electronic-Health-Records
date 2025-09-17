@@ -76,7 +76,7 @@ export default function Page() {
   };
 
   useEffect(() => {
-    loadList(); // initial load
+    loadList();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -93,6 +93,14 @@ export default function Page() {
     () => canBook && isObjectId(bPatient) && !!bProvider && !!bStart && !!bEnd,
     [canBook, bPatient, bProvider, bStart, bEnd]
   );
+
+  const conflictMsg = (data: any) => {
+    if (!data) return "Time conflict with an existing appointment.";
+    const start = data.conflictStart ? new Date(data.conflictStart).toLocaleString() : "";
+    const end = data.conflictEnd ? new Date(data.conflictEnd).toLocaleString() : "";
+    const type = data.conflictType === "patient" ? "patient" : "provider";
+    return `Conflict with existing ${type} appointment (${start} - ${end}).`;
+  };
 
   const submit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -115,17 +123,14 @@ export default function Page() {
         reason: bReason || undefined,
       });
       show("✅ Appointment booked");
-      // clean the form after success
       setBStart("");
       setBEnd("");
       setBReason("");
-      // refresh list using current filters
       loadList();
     } catch (ex: any) {
-      const msg =
-        ex?.response?.status === 409 && ex?.response?.data
-          ? "Time conflict with an existing appointment."
-          : ex?.response?.data?.message || "Booking failed.";
+      const status = ex?.response?.status;
+      const data = ex?.response?.data;
+      const msg = status === 409 ? conflictMsg(data) : data?.message || "Booking failed.";
       setBookErr(msg);
       show(`⚠️ ${msg}`);
     } finally {
@@ -207,10 +212,9 @@ export default function Page() {
       setRReason("");
       loadList();
     } catch (ex: any) {
-      const msg =
-        ex?.response?.status === 409
-          ? "Time conflict with an existing appointment."
-          : ex?.response?.data?.message || "Reschedule failed.";
+      const status = ex?.response?.status;
+      const data = ex?.response?.data;
+      const msg = status === 409 ? conflictMsg(data) : data?.message || "Reschedule failed.";
       setRErr(msg);
       show(`⚠️ ${msg}`);
     } finally {
@@ -592,7 +596,6 @@ export default function Page() {
         )}
       </div>
 
-      {/* toast */}
       <Toast />
     </div>
   );

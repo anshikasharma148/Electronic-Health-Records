@@ -1,22 +1,9 @@
-// backend/src/controllers/appointmentController.ts
 import { Request, Response } from "express";
 import { isValidObjectId, Types } from "mongoose";
 import Appointment from "../models/Appointment";
-import Patient from "../models/Patient"; // ensure this path matches your project
+import Patient from "../models/Patient";
 
 // ---- helpers ----
-const toDate = (v?: string | string[]) => (typeof v === "string" ? new Date(v) : undefined);
-
-const overlapQuery = (start: Date, end: Date, excludeId?: string) => {
-  const q: any = {
-    status: { $ne: "cancelled" },
-    start: { $lt: end },
-    end: { $gt: start },
-  };
-  if (excludeId && isValidObjectId(excludeId)) q._id = { $ne: new Types.ObjectId(excludeId) };
-  return q;
-};
-
 const ensureDates = (start?: Date, end?: Date) => {
   if (!start || !end || isNaN(start.getTime()) || isNaN(end.getTime())) {
     return "start and end must be valid ISO datetimes";
@@ -25,6 +12,17 @@ const ensureDates = (start?: Date, end?: Date) => {
     return "end must be after start";
   }
   return null;
+};
+
+const conflictQuery = (start: Date, end: Date, providerId: string, patientId: string, excludeId?: string) => {
+  const q: any = {
+    status: { $ne: "cancelled" },
+    start: { $lt: end },
+    end: { $gt: start },
+    $or: [{ providerId }, { patient: new Types.ObjectId(patientId) }],
+  };
+  if (excludeId && isValidObjectId(excludeId)) q._id = { $ne: new Types.ObjectId(excludeId) };
+  return q;
 };
 
 // ---- GET /api/appointments ----
@@ -95,22 +93,19 @@ export const create = async (req: Request, res: Response) => {
     const dateErr = ensureDates(start, end);
     if (dateErr) return res.status(400).json({ message: dateErr });
 
-    // patient exists?
     const pat = await Patient.findById(patient).select("_id").lean();
     if (!pat) return res.status(404).json({ message: "patient_not_found" });
 
-    // conflict check: provider overlap
-    const conflict = await Appointment.findOne({
-      providerId,
-      ...overlapQuery(start, end),
-    }).lean();
-
+    // conflict check against same provider OR same patient
+    const conflict = await Appointment.findOne(conflictQuery(start, end, providerId, patient)).lean();
     if (conflict) {
+      const type = String(conflict.providerId) === String(providerId) ? "provider" : "patient";
       return res.status(409).json({
         message: "conflict_with_existing_appointment",
         conflictId: conflict._id,
         conflictStart: conflict.start,
         conflictEnd: conflict.end,
+        conflictType: type,
       });
     }
 
@@ -146,7 +141,7 @@ export const getOne = async (req: Request, res: Response) => {
   }
 };
 
-// ---- PUT /api/appointments/:id (reschedule / update) ----
+// ---- PUT /api/appointments/:id ----
 export const update = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
@@ -157,7 +152,6 @@ export const update = async (req: Request, res: Response) => {
 
     const { start: startStr, end: endStr, reason, location, status } = req.body || {};
 
-    // handle reschedule (start/end change)
     if (startStr || endStr) {
       const newStart = startStr ? new Date(startStr) : appt.start;
       const newEnd = endStr ? new Date(endStr) : appt.end;
@@ -165,25 +159,25 @@ export const update = async (req: Request, res: Response) => {
       const dateErr = ensureDates(newStart, newEnd);
       if (dateErr) return res.status(400).json({ message: dateErr });
 
-      // conflict check (exclude self)
-      const conflict = await Appointment.findOne({
-        providerId: appt.providerId,
-        ...overlapQuery(newStart, newEnd, id),
-      }).lean();
+      // conflict (exclude self) for same provider OR same patient
+      const conflict = await Appointment.findOne(
+        conflictQuery(newStart, newEnd, appt.providerId, String(appt.patient), id)
+      ).lean();
 
       if (conflict) {
+        const type = String(conflict.providerId) === String(appt.providerId) ? "provider" : "patient";
         return res.status(409).json({
           message: "conflict_with_existing_appointment",
           conflictId: conflict._id,
           conflictStart: conflict.start,
           conflictEnd: conflict.end,
+          conflictType: type,
         });
       }
 
       appt.start = newStart;
       appt.end = newEnd;
 
-      // if times changed, mark as rescheduled unless explicitly cancelled/completed
       if (appt.isModified("start") || appt.isModified("end")) {
         if (!status || (status !== "cancelled" && status !== "completed")) {
           appt.status = "rescheduled";
@@ -205,7 +199,7 @@ export const update = async (req: Request, res: Response) => {
   }
 };
 
-// ---- DELETE /api/appointments/:id (cancel) ----
+// ---- DELETE /api/appointments/:id ----
 export const cancel = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
@@ -225,7 +219,6 @@ export const cancel = async (req: Request, res: Response) => {
 };
 
 // ---- GET /api/appointments/availability ----
-// params: providerId (required), date (YYYY-MM-DD) required, slotMins?=30
 export const availability = async (req: Request, res: Response) => {
   try {
     const { providerId, date, slotMins } = req.query as Record<string, string>;
@@ -237,10 +230,9 @@ export const availability = async (req: Request, res: Response) => {
     const base = new Date(date);
     if (isNaN(base.getTime())) return res.status(400).json({ message: "invalid date" });
 
-    const startOfDay = new Date(base); startOfDay.setHours(9, 0, 0, 0);   // 09:00
-    const endOfDay = new Date(base);   endOfDay.setHours(17, 0, 0, 0);    // 17:00
+    const startOfDay = new Date(base); startOfDay.setHours(9, 0, 0, 0);
+    const endOfDay = new Date(base);   endOfDay.setHours(17, 0, 0, 0);
 
-    // existing appts for that provider on that day
     const existing = await Appointment.find({
       providerId,
       status: { $ne: "cancelled" },
@@ -248,7 +240,6 @@ export const availability = async (req: Request, res: Response) => {
       end: { $gt: startOfDay },
     }).select("start end").lean();
 
-    // generate candidate slots
     const slots: { start: Date; end: Date }[] = [];
     for (let t = startOfDay.getTime(); t + mins * 60000 <= endOfDay.getTime(); t += mins * 60000) {
       const s = new Date(t);
@@ -256,7 +247,6 @@ export const availability = async (req: Request, res: Response) => {
       slots.push({ start: s, end: e });
     }
 
-    // remove overlapping with existing
     const available = slots.filter(({ start, end }) => {
       return !existing.some((x) => x.start < end && x.end > start);
     });
