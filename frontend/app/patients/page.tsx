@@ -15,13 +15,13 @@ import {
   FiCalendar,
   FiUserX,
   FiCopy,
-  FiExternalLink,
   FiCalendar as FiBook,
   FiEye,
   FiChevronLeft,
   FiChevronRight,
   FiInfo,
-  FiFilter
+  FiFilter,
+  FiActivity,          // 👈 add this
 } from "react-icons/fi";
 
 export default function Page() {
@@ -75,22 +75,18 @@ export default function Page() {
       setDeletingId(id);
       await api.delete(API.patients.one(id));
 
-      // Optimistically update list
       setData(prev => {
         if (!prev) return prev;
         const items = prev.items.filter(p => p._id !== id);
-        const next = { ...prev, items, total: Math.max(0, (prev.total || 0) - 1) };
-        return next as Paginated<Patient>;
+        return { ...prev, items, total: Math.max(0, (prev.total || 0) - 1) } as Paginated<Patient>;
       });
 
-      // If the page becomes empty and we're not on the first page, go back one page
       setTimeout(() => {
         setDeletingId(null);
         setData(curr => {
           if (curr && curr.items.length === 0 && page > 1) {
             setPage(p => Math.max(1, p - 1));
           } else {
-            // refresh current page to keep pagination/total accurate
             load();
           }
           return curr;
@@ -108,12 +104,10 @@ export default function Page() {
         {/* Header */}
         <div className="mb-8">
           <h1 className="text-3xl font-bold text-gray-800 flex items-center gap-3">
-            <FiUser className="text-blue-600" /> 
+            <FiUser className="text-blue-600" />
             Patient Management
           </h1>
-          <p className="text-gray-500 mt-2">
-            Search, view, and manage patient records
-          </p>
+          <p className="text-gray-500 mt-2">Search, view, and manage patient records</p>
         </div>
 
         {/* Search and Actions */}
@@ -128,14 +122,11 @@ export default function Page() {
                 className="pl-10 pr-4 py-2 w-full"
               />
             </div>
-            
-            <Button 
-              onClick={() => setPage(1)} 
-              className="flex items-center gap-2 w-full md:w-auto"
-            >
+
+            <Button onClick={() => setPage(1)} className="flex items-center gap-2 w-full md:w-auto">
               <FiSearch size={16} /> Search
             </Button>
-            
+
             {canCreate ? (
               <Link
                 href="/patients/new"
@@ -173,7 +164,6 @@ export default function Page() {
         {/* Patients Table */}
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
           {loading ? (
-            // Skeleton loading state
             <div className="p-6 space-y-4">
               {[...Array(5)].map((_, i) => (
                 <div key={i} className="flex items-center justify-between py-3 border-b border-gray-100">
@@ -204,9 +194,6 @@ export default function Page() {
                           <div className="font-medium text-gray-800">
                             {p.firstName} {p.lastName}
                           </div>
-                          {/* <div className="text-sm text-gray-500 mt-1">
-                            {p.email || 'No email'}
-                          </div> */}
                           <div className="flex items-center gap-2 mt-2">
                             <span className="font-mono text-xs text-gray-400 bg-gray-100 px-2 py-1 rounded">
                               {p._id.substring(0, 8)}...
@@ -218,7 +205,7 @@ export default function Page() {
                               onClick={() => copyToClipboard(p._id)}
                             >
                               <FiCopy size={12} />
-                              {copiedId === p._id ? 'Copied!' : 'Copy ID'}
+                              {copiedId === p._id ? "Copied!" : "Copy ID"}
                             </button>
                           </div>
                         </div>
@@ -236,17 +223,25 @@ export default function Page() {
                       </Td>
                       <Td>
                         <div className="flex flex-wrap gap-2">
-                          <Link 
+                          <Link
                             href={`/patients/${p._id}`}
                             className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm bg-gray-100 text-gray-700 hover:bg-gray-200 transition-colors"
                           >
                             <FiEye size={14} /> View
                           </Link>
-                          <Link 
+                          <Link
                             href={`/appointments?patient=${p._id}`}
                             className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm bg-blue-100 text-blue-700 hover:bg-blue-200 transition-colors"
                           >
                             <FiBook size={14} /> Book
+                          </Link>
+
+                          {/* NEW: Clinical shortcut */}
+                          <Link
+                            href={`/clinical?patient=${p._id}`}
+                            className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm bg-purple-100 text-purple-700 hover:bg-purple-200 transition-colors"
+                          >
+                            <FiActivity size={14} /> Clinical
                           </Link>
 
                           {/* Delete (admin only) */}
@@ -271,9 +266,9 @@ export default function Page() {
           ) : (
             <div className="text-center py-12 text-gray-500">
               <FiUserX className="text-gray-300 text-4xl mx-auto mb-3" />
-              <p>{q ? 'No patients found matching your search' : 'No patients found'}</p>
+              <p>{q ? "No patients found matching your search" : "No patients found"}</p>
               <p className="text-sm mt-1">
-                {q ? 'Try adjusting your search terms' : 'Create a new patient to get started'}
+                {q ? "Try adjusting your search terms" : "Create a new patient to get started"}
               </p>
             </div>
           )}
@@ -286,8 +281,8 @@ export default function Page() {
               Page {data?.page ?? page} of {Math.ceil((data?.total ?? 0) / 10)}
             </div>
             <div className="flex items-center gap-2">
-              <Button 
-                variant="outline" 
+              <Button
+                variant="outline"
                 onClick={() => setPage((p) => Math.max(1, p - 1))}
                 disabled={page === 1}
                 className="flex items-center gap-1"

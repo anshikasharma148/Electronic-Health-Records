@@ -25,7 +25,10 @@ import {
   FiInfo,
   FiCopy,
   FiArrowUp,
-  FiArrowDown
+  FiArrowDown,
+  FiDownload,
+  FiChevronLeft,
+  FiChevronRight
 } from "react-icons/fi";
 
 const isObjectId = (s: string) => /^[a-fA-F0-9]{24}$/.test(s);
@@ -160,33 +163,56 @@ export default function Page() {
       setSortOrder("asc");
       return field;
     });
+    // when sort changes, keep current page; backend will sort there
   };
 
-  const loadClaims = async () => {
+  // NEW: pagination
+  const [clPage, setClPage] = useState(1);
+  const [clLimit, setClLimit] = useState(25);
+  const [clTotal, setClTotal] = useState(0);
+
+  const loadClaims = async (forcePage?: number) => {
     if (!allowed) return;
     try {
       setClErr(null);
-      const params: Record<string, string> = { limit: "100", sort: sortBy, order: sortOrder };
-      // use patientId (server expects patientId)
+      const page = forcePage ?? clPage;
+      const params: Record<string, string> = {
+        page: String(page),
+        limit: String(clLimit),
+        sort: sortBy,
+        order: sortOrder
+      };
       if (isObjectId(fPatient)) params.patientId = fPatient.trim();
       if (fProvider.trim()) params.providerId = fProvider.trim();
       if (fStatus) params.status = fStatus;
+
       const r = await api.get(API.billing.claims, { params });
       const list = Array.isArray(r.data?.items)
         ? r.data.items
         : Array.isArray(r.data)
         ? r.data
         : [];
+
       setClaims(list);
+      if (typeof r.data?.total === "number") setClTotal(r.data.total);
+      if (typeof r.data?.page === "number") setClPage(r.data.page);
     } catch {
       setClaims([]);
       setClErr("Failed to load claims.");
+      setClTotal(0);
     }
   };
+
   useEffect(() => {
-    loadClaims();
+    loadClaims(1); // initial load
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [allowed, sortBy, sortOrder]);
+  }, [allowed]);
+
+  // reload when sort or limit changes
+  useEffect(() => {
+    loadClaims(clPage);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sortBy, sortOrder, clLimit]);
 
   const updateStatus = async (id: string, status: "paid" | "denied" | "pending") => {
     try {
@@ -200,6 +226,53 @@ export default function Page() {
     } catch (ex: any) {
       show(`⚠️ ${ex?.response?.data?.message || "Failed to update claim."}`);
     }
+  };
+
+  // CSV export (current page view)
+  const exportCsv = () => {
+    if (!claims?.length) {
+      show("⚠️ No claims to export.");
+      return;
+    }
+    const esc = (v: any) => {
+      const s = String(v ?? "");
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const rows = [
+      ["Patient", "PatientId", "ProviderId", "Code", "Description", "Amount", "Status", "CreatedAt"]
+        .map(esc)
+        .join(","),
+      ...claims.map((c: any) => {
+        const pid =
+          typeof c.patient === "string" ? c.patient :
+          c?.patient?._id ? c.patient._id : "";
+        const pname =
+          typeof c.patient === "string"
+            ? c.patient
+            : c?.patient?.firstName
+            ? `${c.patient.firstName} ${c.patient.lastName}`
+            : "Unknown";
+        const created = c.createdAt ? new Date(c.createdAt).toISOString() : "";
+        return [
+          esc(pname),
+          esc(pid),
+          esc(c.providerId ?? ""),
+          esc(c.code ?? ""),
+          esc(c.description ?? ""),
+          esc(Number(c.amount ?? 0)),
+          esc(c.status ?? ""),
+          esc(created)
+        ].join(",");
+      })
+    ].join("\n");
+
+    const blob = new Blob([rows], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `claims_page-${clPage}_limit-${clLimit}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   // ---------------- Eligibility ----------------
@@ -308,6 +381,10 @@ export default function Page() {
     );
   }
 
+  const totalPages = Math.max(1, Math.ceil((clTotal || 0) / clLimit));
+  const showingFrom = (clPage - 1) * clLimit + 1;
+  const showingTo = (clPage - 1) * clLimit + claims.length;
+
   return (
     <div className="space-y-8 p-4 md:p-6">
       {/* Header */}
@@ -315,9 +392,14 @@ export default function Page() {
         <h1 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
           <FiDollarSign className="text-blue-600" /> Billing Dashboard
         </h1>
-        <Button onClick={loadClaims} className="flex items-center gap-2">
-          <FiRefreshCw /> Refresh
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={exportCsv} className="flex items-center gap-2">
+            <FiDownload /> Export CSV
+          </Button>
+          <Button onClick={() => loadClaims()} className="flex items-center gap-2">
+            <FiRefreshCw /> Refresh
+          </Button>
+        </div>
       </div>
 
       {/* Reports */}
@@ -475,7 +557,28 @@ export default function Page() {
               <option value="paid">paid</option>
               <option value="denied">denied</option>
             </Select>
-            <Button onClick={loadClaims} className="flex items-center gap-1">
+            <Select
+              value={String(clLimit)}
+              onChange={(e) => {
+                const v = Number((e.target as HTMLSelectElement).value || 25);
+                setClLimit(v);
+                setClPage(1);
+                loadClaims(1);
+              }}
+              className="min-w-[120px]"
+            >
+              <option value="10">10 / page</option>
+              <option value="25">25 / page</option>
+              <option value="50">50 / page</option>
+              <option value="100">100 / page</option>
+            </Select>
+            <Button
+              onClick={() => {
+                setClPage(1);
+                loadClaims(1);
+              }}
+              className="flex items-center gap-1"
+            >
               <FiFilter size={14} /> Filter
             </Button>
             <Button
@@ -486,13 +589,22 @@ export default function Page() {
                 setFStatus("");
                 setSortBy("createdAt");
                 setSortOrder("desc");
-                loadClaims();
+                setClPage(1);
+                loadClaims(1);
               }}
               className="flex items-center gap-1"
             >
               <FiRefreshCw size={14} /> Clear
             </Button>
           </div>
+        </div>
+
+        <div className="text-sm text-gray-500">
+          {clTotal > 0 ? (
+            <>Showing <b>{showingFrom}</b>–<b>{showingTo}</b> of <b>{clTotal}</b> claims</>
+          ) : (
+            <>No claims</>
+          )}
         </div>
 
         <div className="overflow-x-auto rounded-lg border border-gray-200">
@@ -531,6 +643,16 @@ export default function Page() {
                       title="Sort by Status"
                     >
                       Status {sortBy === "status" && (sortOrder === "asc" ? <FiArrowUp /> : <FiArrowDown />)}
+                    </button>
+                  </Th>
+                  <Th>
+                    <button
+                      type="button"
+                      className="flex items-center gap-1"
+                      onClick={() => toggleSort("createdAt")}
+                      title="Sort by Created"
+                    >
+                      Created {sortBy === "createdAt" && (sortOrder === "asc" ? <FiArrowUp /> : <FiArrowDown />)}
                     </button>
                   </Th>
                   <Th>Actions</Th>
@@ -585,6 +707,7 @@ export default function Page() {
                         {c.status}
                       </span>
                     </Td>
+                    <Td>{c.createdAt ? new Date(c.createdAt).toLocaleString() : "-"}</Td>
                     <Td>
                       <div className="flex flex-wrap gap-2">
                         <Button 
@@ -616,6 +739,40 @@ export default function Page() {
             </T>
           </Table>
         </div>
+
+        {/* Pagination */}
+        <div className="flex items-center justify-between pt-3">
+          <div className="text-sm text-gray-500">
+            Page <b>{clPage}</b> of <b>{totalPages}</b>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              onClick={() => {
+                const next = Math.max(1, clPage - 1);
+                setClPage(next);
+                loadClaims(next);
+              }}
+              disabled={clPage === 1}
+              className="flex items-center gap-1"
+            >
+              <FiChevronLeft /> Previous
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => {
+                const next = Math.min(totalPages, clPage + 1);
+                setClPage(next);
+                loadClaims(next);
+              }}
+              disabled={clPage >= totalPages}
+              className="flex items-center gap-1"
+            >
+              Next <FiChevronRight />
+            </Button>
+          </div>
+        </div>
+
         {clErr && <div className="text-sm text-red-600 bg-red-50 p-2 rounded-lg flex items-center gap-2 mt-3"><FiInfo /> {clErr}</div>}
         {claims.length === 0 && !clErr && (
           <div className="text-center py-8 text-gray-500 flex flex-col items-center">
@@ -705,7 +862,7 @@ export default function Page() {
             onChange={(e) => setBPatient(e.target.value)}
             className="md:col-span-2"
           />
-          <Button
+        <Button
             onClick={() => {
               if (!isObjectId(bPatient)) {
                 show("⚠️ Enter a valid PatientId (24-hex).");

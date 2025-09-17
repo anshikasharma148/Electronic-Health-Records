@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import Input from "@/components/ui/Input";
 import Button from "@/components/ui/Button";
 import { Table, T, Th, Td } from "@/components/ui/Table";
+import { useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
 import { API } from "@/lib/endpoints";
 import { getUser } from "@/lib/auth";
@@ -104,6 +105,12 @@ export default function Page() {
       show(`⚠️ ${ex?.response?.data?.message || "Failed to add note."}`);
     }
   };
+  const sp = useSearchParams();
+useEffect(() => {
+  const pid = sp.get("patient") || sp.get("id");
+  if (pid) setPatientId(pid);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [sp]);
 
   // Vital form
   const [vWhen, setVWhen] = useState(""); // datetime-local

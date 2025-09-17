@@ -20,12 +20,7 @@ export const listOverview = async (req: Request, res: Response, next: NextFuncti
       return res.json({ notes: [], vitals: [], labs: [] });
     }
     const r = await clinicalService.getOverview(patientId);
-    // be defensive about service return shape
-    res.json({
-      notes: Array.isArray((r as any)?.notes) ? (r as any).notes : [],
-      vitals: Array.isArray((r as any)?.vitals) ? (r as any).vitals : [],
-      labs: Array.isArray((r as any)?.labs) ? (r as any).labs : [],
-    });
+    res.json(r); // service already returns arrays with UI-friendly fields
   } catch (e) {
     next(e);
   }
@@ -40,7 +35,11 @@ export const addNote = async (req: Request, res: Response, next: NextFunction) =
     if (!isValidObjectId(patientId)) return res.status(400).json({ message: "invalid patient id" });
     if (!text) return res.status(400).json({ message: "text_required" });
 
-    const r = await clinicalService.addNote({ patientId, text, createdAt });
+    // pull an author identifier from the auth middleware if present
+    const u: any = (req as any).user || {};
+    const authorId = String(u.id || u._id || u.email || "system");
+
+    const r = await clinicalService.addNote({ patientId, text, createdAt, authorId });
     res.status(201).json(r);
   } catch (e) {
     next(e);
@@ -50,10 +49,7 @@ export const addNote = async (req: Request, res: Response, next: NextFunction) =
 export const recordVitals = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const patientId = s(req.body.patientId);
-    // accept either recordedAt or when (frontend may use either)
-    const recordedAt =
-      toDate(req.body.recordedAt) ?? toDate(req.body.when) ?? new Date();
-
+    const recordedAt = toDate(req.body.recordedAt ?? req.body.when) ?? new Date();
     const hrNum = Number(req.body.hr);
     const bp = s(req.body.bp);
 
@@ -62,12 +58,7 @@ export const recordVitals = async (req: Request, res: Response, next: NextFuncti
     if (Number.isNaN(hrNum)) return res.status(400).json({ message: "invalid hr" });
     if (!bp) return res.status(400).json({ message: "bp_required" });
 
-    const r = await clinicalService.recordVitals({
-      patientId,
-      recordedAt,
-      hr: hrNum,
-      bp,
-    });
+    const r = await clinicalService.recordVitals({ patientId, recordedAt, hr: hrNum, bp });
     res.status(201).json(r);
   } catch (e) {
     next(e);
@@ -78,11 +69,10 @@ export const listLabs = async (req: Request, res: Response, next: NextFunction) 
   try {
     const patientId = s(req.query.patientId);
     if (!isValidObjectId(patientId)) {
-      // return empty list rather than 500
-      return res.json([]);
+      return res.json([]); // empty list rather than error
     }
     const r = await clinicalService.listLabs(patientId);
-    res.json(Array.isArray(r) ? r : []);
+    res.json(r);
   } catch (e) {
     next(e);
   }
@@ -105,26 +95,18 @@ export const addDiagnosis = async (req: Request, res: Response, next: NextFuncti
   }
 };
 
-/* === additions below (kept) — with light validation === */
+/* === Vitals update (UI -> schema mapping happens in service) === */
 export const updateVital = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = s(req.params.id);
     if (!isValidObjectId(id)) return res.status(400).json({ message: "invalid id" });
 
-    const patch: any = {};
-    if (req.body.hr != null) {
-      const n = Number(req.body.hr);
-      if (Number.isNaN(n)) return res.status(400).json({ message: "invalid hr" });
-      patch.hr = n;
-    }
-    if (typeof req.body.bp === "string") patch.bp = s(req.body.bp);
-    if (req.body.recordedAt || req.body.when) {
-      const d = toDate(req.body.recordedAt ?? req.body.when);
-      if (!d) return res.status(400).json({ message: "invalid recordedAt" });
-      patch.recordedAt = d;
-    }
+    const r = await clinicalService.updateVital(id, {
+      hr: req.body.hr,
+      bp: req.body.bp,
+      recordedAt: req.body.recordedAt ?? req.body.when,
+    });
 
-    const r = await clinicalService.updateVital(id, patch);
     if (!r) return res.status(404).json({ message: "not_found" });
     res.json(r);
   } catch (e) {
@@ -152,7 +134,6 @@ export const addLab = async (req: Request, res: Response, next: NextFunction) =>
 
 export const addEncounter = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    // pass-through after minimal normalization (keeps your service contract)
     const payload = { ...req.body };
     if (!isValidObjectId(s(payload.patientId))) {
       return res.status(400).json({ message: "invalid patient id" });
